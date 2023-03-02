@@ -23,7 +23,7 @@ def adam_step(theta, t, m, v, grad):
     beta1 = 0.9
     beta2 = 0.999
     eps = 1e-8
-    alpha = 0.01
+    alpha = 0.005
 
     # Implement one step of the Adam optimizer
     m = beta1*m + (1-beta1)*grad

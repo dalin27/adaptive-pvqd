@@ -2,7 +2,7 @@
 
 Implementatiton based on: 
 - https://github.com/StefanoBarison/p-VQD
-- https://github.com/Qiskit/qiskit-terra/tree/main/qiskit/algorithms/evolvers/pvqd
+- https://github.com/Qiskit/qiskit-terra/tree/main/qiskit/algorithms/time_evolvers/pvqd
 
 which are in turn mainly based on the following papers:
 

@@ -149,12 +149,54 @@ def num_op(n_qubits, site):
 	return c_dag_op(n_qubits, site) @ c_op(n_qubits, site)
 
 
-def hubbard_2D_hamiltonian(size_x, size_y, model_params, time=None, bound_cond='open'):
-	""" (Spinful) 2D Hubbard model on a rectangular lattice with either periodic or open boundary conditions.
+def hubbard_ladder_hamiltonian(size_x, model_params, time=None):
+	""" Hubbard model on a Lx x 2 lattice with open boundary conditions.
+
+	Args:
+		size_x (int): dimensions of the square lattice
+		model_params (List[float,...]): hopping and Coulomb strength parameters
+		time (float): time of the evolution (useless parameter here since the Hamiltonian is 
+					time-independent; only here to avoid changing the structure of the code)
+
+	Returns:
+		h (PauliSumOp): Hamiltonian of the 2D Hubbard model
+	"""
+
+	hop, coul = model_params  # unpack the model parameters
+	h = 0  # initialize the Hamiltonian
+	n_qubits = 2*size_x*2  
+
+	# Implement the hopping terms
+	site_indices = range(int(n_qubits/2))
+	hopping_idx_pairs = [(i, i+1) for i in site_indices[:-1]]  # spin up modes nearest neighbour index pairs
+	hopping_idx_pairs += list(zip(site_indices[0::2][:-1], site_indices[1::2][1:]))  # spin up modes long-range index pairs 
+	hopping_idx_pairs += list(np.array(hopping_idx_pairs) + int(n_qubits/2)) # spin down modes index pairs 
+	hopping_idx_pairs = [list(x) for x in hopping_idx_pairs]
+	# print(f'Hopping index pairs: {hopping_idx_pairs}')
+
+	for i, j in hopping_idx_pairs:
+		h += -hop * c_dag_op(n_qubits, i) @ c_op(n_qubits, j) 
+		h += -hop * c_dag_op(n_qubits, j) @ c_op(n_qubits, i)
+
+	# Implement the on-site interaction terms
+	qubit_indices = range(n_qubits)
+	int_idx_pairs = list(zip(qubit_indices[:int(n_qubits/2)], qubit_indices[int(n_qubits/2):]))
+	# print(f'On-site interaction index pairs: {int_idx_pairs}')
+
+	for i, j in int_idx_pairs:
+		h += coul * num_op(n_qubits, i) @ num_op(n_qubits, j)	
+
+	return h.reduce()
+
+
+def hubbard_2D_hamiltonian(size_x, size_y, model_params, fermionic_indexing='allupalldown', time=None, bound_cond='open'):
+	""" 2D Hubbard model on a rectangular lattice with either periodic or open boundary conditions.
 
 	Args:
 		size_x, size_y (int): dimensions of the square lattice
 		model_params (List[float,...]): hopping and Coulomb strength parameters
+		fermionic_indexing (str): specify the ordering of the indexing of the fermionic modes
+								(either 'alternating' or 'allupalldown')
 		time (float): time of the evolution (useless parameter here since the Hamiltonian is 
 					time-independent; only here to avoid changing the structure of the code)
 		bound_cond (str): boundary condition; either 'periodic' or 'open'
@@ -163,7 +205,6 @@ def hubbard_2D_hamiltonian(size_x, size_y, model_params, time=None, bound_cond='
 		h (PauliSumOp): Hamiltonian of the 2D Hubbard model
 	"""
 
-	size_x, size_y = size_x, size_y  # get the size of the square lattice
 	hop, coul = model_params  # unpack the model parameters
 	h = 0  # initialize the Hamiltonian
 	n_qubits = 2*size_x*size_y  
@@ -179,7 +220,12 @@ def hubbard_2D_hamiltonian(size_x, size_y, model_params, time=None, bound_cond='
 			grid_2d_indices_snake += list(reversed(grid_2d_indices[i::size_y]))
 	
 	# Mapping from 2D grid indices to the up and down fermionic modes at that site
-	grid_mode_idx = list(map(lambda x: [2*x, 2*x+1], range(len(grid_2d_indices_snake))))
+	if fermionic_indexing == 'alternating':
+		grid_mode_idx = list(map(lambda i: [2*i, 2*i+1], range(len(grid_2d_indices_snake))))
+	elif fermionic_indexing == 'allupalldown':
+		grid_mode_idx = list(map(lambda i: [i, int(i+n_qubits/2)], range(len(grid_2d_indices_snake))))
+	else:
+		print(f'Indexing not yet implemented')
 	index_map = dict(zip(grid_2d_indices_snake, grid_mode_idx))
 
 	if bound_cond == 'open':
@@ -204,9 +250,9 @@ def hubbard_2D_hamiltonian(size_x, size_y, model_params, time=None, bound_cond='
 			for nn_hop_idx_pair in nn_hop_idx_pairs:
 				# print(f'Hopping index pair: {nn_hop_idx_pair}')
 				i, j = nn_hop_idx_pair
-				h += -hop * c_dag_op(n_qubits, i) @ c_op(n_qubits, j)
+				h += -hop * c_dag_op(n_qubits, i) @ c_op(n_qubits, j) 
 				h += -hop * c_dag_op(n_qubits, j) @ c_op(n_qubits, i)
-			
+
 		# Loop over ALL 2D coordinates in the square grid (not so efficient to redo a loop over the grid indices
 		# but it's better for clarity)
 		for grid_2d_idx in grid_2d_indices_snake:
@@ -219,3 +265,4 @@ def hubbard_2D_hamiltonian(size_x, size_y, model_params, time=None, bound_cond='
 		print('Periodic boundary conditions have not yet been implemented.')
 
 	return h.reduce()
+

@@ -19,26 +19,27 @@ backend = Aer.get_backend("statevector_simulator")
 instance = QuantumInstance(backend=backend, shots=1)
 
 ## Define a (possibly time-dependent) Hamiltonian
-# hamiltonian = partial(hubbard_2D_hamiltonian, size_x=2, size_y=2, model_params=[1,0.8])
-hamiltonian = partial(xyz_floquet_hamiltonian, n_qubits=n_qubits, model_params=[1,1,1,0])
+# hamiltonian = partial(hubbard_ladder_hamiltonian, size_x=2, model_params=[1,0.8])
+hamiltonian = partial(xyz_floquet_hamiltonian, n_qubits=n_qubits, model_params=[1,0.8,0.6,0])
 
 ## Define the initial ansatz and parameters (if applicable)
-# ansatz = AnsatzHubbard2D(n_qubits)
-ansatz = AnsatzXYZFloquet(n_qubits)
+# ansatz = AnsatzLadderHubbard(n_qubits, depth=0)
+ansatz = AnsatzXYZFloquet(n_qubits, depth=3)
 initial_parameters = np.zeros(ansatz.circuit.num_parameters)
 
-## List of observables to measure at each time t of the simulation
-# observables = [num_op(n_qubits, 0) @ num_op(n_qubits, 1),
-#                num_op(n_qubits, 0) @ num_op(n_qubits, 4)]
+# List of observables to measure at each time t of the simulation
+# observables = [num_op(n_qubits, 0) @ num_op(n_qubits, 4),
+#                num_op(n_qubits, 0) @ num_op(n_qubits, 2)]
 observables=[one_site_op(n_qubits, 0, X),
-             one_site_op(n_qubits, 0, Z),
-             nearest_neigh_op(n_qubits, 0, [X, X]),
-             nearest_neigh_op(n_qubits, 0, [Z, Z])]
+            one_site_op(n_qubits, 0, Z),
+            nearest_neigh_op(n_qubits, 0, [X, X]),
+            nearest_neigh_op(n_qubits, 0, [Z, Z])]
+
 
 # Initialize the algorithm
 adaptive_pvqd = AdaptivePVQD(
     ansatz,
-    maxiter=400,
+    maxiter=200,
     fidelity_tolerance=0.9999,
     gradient_tolerance=5e-5,
     expectation= PauliExpectation(),
@@ -55,10 +56,10 @@ result = adaptive_pvqd.evolve(
         observables=observables
 )
 
-# Save the data in a file
-import pickle
-# f = open("data_and_figures/hubbard/adaptive_pvqd_hubbard_2x2_params=1_0.8_bc=open_tol=0.9999.pkl", "wb")
-f = open("data_and_figures/xyz_floquet/adaptive_pvqd_xyz_floquet_params=1_1_1_0_bc=open_tol=0.9999.pkl", "wb")
-pickle.dump(result, f)
-f.close()
+# # Save the data in a file
+# import pickle
+# # f = open("data_and_figures/2d_hubbard/pool_adaptive_pvqd_hubbard_2x2_params=1_0.8_n=2_bc=open_tol=0.9999.pkl", "wb")
+# f = open("data_and_figures/driven_xyz/pvqd/pvqd_n=3_driven_xyz_n_qubits=8_params=1_0.8_0.6_0_bc=open.pkl", "wb")
+# pickle.dump(result, f)
+# f.close()
 

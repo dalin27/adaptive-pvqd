@@ -59,7 +59,7 @@ class AdaptivePVQD:
 
         # Get the time evolved circuit
         trotterized_ansatz = circuit_ansatz.assign_parameters(var_parameters)
-        evolution_gate = PauliEvolutionGate(hamiltonian, time=time_step)
+        evolution_gate = PauliEvolutionGate(hamiltonian, time=time_step)  # Lie-Trotter with a single decomposition
         trotterized_ansatz.append(evolution_gate, circuit_ansatz.qubits)
 
         # Get the shifted circuit in parameter space
@@ -181,6 +181,12 @@ class AdaptivePVQD:
         print(f'Operators added to the circuit: {operators}')
         # print(f'New circuit ansatz: \n{new_circuit_ansatz}')
 
+        # # Add a Trotter step to the parametrized circuit
+        # self.ansatz.add_a_trotter_step()
+        # print(f"A Trotter step has been added to the circuit ansatz.")
+        # print(self.ansatz.circuit)
+        # new_circuit_ansatz = self.ansatz.circuit
+
         self.ansatz.circuit = new_circuit_ansatz  # Overwrite the current circuit
         return new_circuit_ansatz
 
@@ -220,7 +226,7 @@ class AdaptivePVQD:
         v = np.zeros(len(var_parameters))
 
         count = 0  # to count the number of iterations of Adam
-        while fid < self.fidelity_tolerance and grad_norm > self.gradient_tolerance and count < self.maxiter: 
+        while grad_norm > self.gradient_tolerance and count < self.maxiter:  
             count += 1
 
             grad = gradient(updated_shift)
@@ -273,7 +279,7 @@ class AdaptivePVQD:
                 time_step
             )
 
-        # Adaptive part:
+        # Adaptive part (comment out the while loop if adaptive part should not be used):
         updated_var_parameters = np.copy(var_parameters)
         while fidelity < self.fidelity_tolerance:
             
@@ -339,6 +345,9 @@ class AdaptivePVQD:
                     "observables values": [evaluate_observables(initial_parameters)],
                     "evolved state": []
                     }
+        
+        evolved_state = self.ansatz.circuit.bind_parameters(initial_parameters)
+        data_log["evolved state"].append(evolved_state)
 
         # Loop over all time steps (to reach the final time)
         for tt in times[1:]:

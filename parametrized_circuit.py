@@ -49,9 +49,10 @@ class Ansatz:
 
         return params
 
-    def create_op_pool(self, one_body_ops_labels, two_body_ops_labels):
+    def create_op_pool(self, pool_type, one_body_ops_labels, two_body_ops_labels):
         """ Create the operator pool.
         Args:
+            pool_type: either 'local' or 'non-local' operator pool
             one_body_ops_labels (List[str,...]): e.g. ['x','y','z']
             two_body_ops_labels (List[str,...]): e.g. ['xx','yy','zz']
 
@@ -59,58 +60,103 @@ class Ansatz:
             pool (List[tuple[str,list]]): operators and their position
         """
         n = self.n_qubits
+        assert pool_type in ['local','non-local'], "pool_type must be either 'local' or 'non-local'"
         pool = []  # initialize a list to store all the trial operators 
-        # idx_pairs = list(combinations(range(n), 2))  # n choose 2 index pairs
+        idx_pairs = list(combinations(range(n), 2))  # n choose 2 index pairs
 
         pool += list(map(lambda op: [(op, [i]) for i in range(n)], one_body_ops_labels))
-        pool += list(map(lambda op: [(op, [i, (i+1) % n]) for i in range(n-1)], two_body_ops_labels))
-        # pool += list(map(lambda op: [(op, list(idx)) for idx in idx_pairs], two_body_ops_labels))
+
+        if pool_type == 'local':    
+            pool += list(map(lambda op: [(op, [i, (i+1) % n]) for i in range(n-1)], two_body_ops_labels))
+            # pool += list(map(lambda op: [(op, list(idx)) for idx in idx_pairs if abs(idx[0]-idx[1]) < 4], two_body_ops_labels))  # "local-ish"
+
+        elif pool_type == 'non-local':
+            pool += list(map(lambda op: [(op, list(idx)) for idx in idx_pairs], two_body_ops_labels))
 
         # Flatten the pool
         pool = [tup for sublist in pool for tup in sublist]
 
         return pool
 
-    def add_ops(self, operators, update_count):
-        """ Add (an) operator(s) to the circuit ansatz.
+
+    def add_ops(self, operators, update_count, location='end'):
+        """ Add (an) operator(s) at the beginning or at the end of the circuit ansatz.
 
         Args:
             operators (List[tuple[str,list]): operators (in the pool) and their positions
             update_count (bool): specify if the total count number should be globally updated
+            location (str): either 'beginning' or 'end' (of the circuit)
 
         Returns:
             circuit (QuantumCircuit): previous circuit ansatz with (an) added operator(s)
         """
         circuit = self.circuit.copy()  # to avoid overwriting
 
-        for op, pos in operators:
+        if location == 'end':
 
-            if op == 'x':
-                p = self.create_params(1, update_count)
-                circuit.rx(*p, *pos)
-            if op == 'y':
-                p = self.create_params(1, update_count)
-                circuit.ry(*p, *pos)
-            if op == 'z':
-                p = self.create_params(1, update_count)
-                circuit.rz(*p, *pos)
-            if op == 'u':
-                p = self.create_params(3, update_count)
-                circuit.u(*p, *pos)
-            if op == 'xx':
-                p = self.create_params(1, update_count)
-                circuit.rxx(*p, *pos)
-            if op == 'yy':
-                p = self.create_params(1, update_count)
-                circuit.ryy(*p, *pos)
-            if op == 'zz':
-                p = self.create_params(1, update_count)
-                circuit.rzz(*p, *pos)
-            if op == 'zx':
-                p = self.create_params(1, update_count)
-                circuit.rzx(*p, *pos)
+            for op, pos in operators:
+
+                if op == 'x':
+                    p = self.create_params(1, update_count)
+                    circuit.rx(*p, *pos)
+                if op == 'y':
+                    p = self.create_params(1, update_count)
+                    circuit.ry(*p, *pos)
+                if op == 'z':
+                    p = self.create_params(1, update_count)
+                    circuit.rz(*p, *pos)
+                if op == 'u':
+                    p = self.create_params(3, update_count)
+                    circuit.u(*p, *pos)
+                if op == 'xx':
+                    p = self.create_params(1, update_count)
+                    circuit.rxx(*p, *pos)
+                if op == 'yy':
+                    p = self.create_params(1, update_count)
+                    circuit.ryy(*p, *pos)
+                if op == 'zz':
+                    p = self.create_params(1, update_count)
+                    circuit.rzz(*p, *pos)
+                if op =='xy':
+                    p = self.create_params(1, update_count)
+                    circuit.append(XXPlusYYGate(*p, beta=0), pos)
+
+        elif location == 'beginning':
+
+            trial_circuit = QuantumCircuit(self.n_qubits)
+            
+            for op, pos in operators:
+
+                if op == 'x':
+                    p = self.create_params(1, update_count)
+                    trial_circuit.rx(*p, *pos)
+                    circuit = circuit.compose(trial_circuit, range(self.n_qubits))
+                if op == 'y':
+                    p = self.create_params(1, update_count)
+                    trial_circuit.ry(*p, *pos)
+                    circuit = circuit.compose(trial_circuit, range(self.n_qubits))
+                if op == 'z':
+                    p = self.create_params(1, update_count)
+                    trial_circuit.rz(*p, *pos)
+                    circuit = circuit.compose(trial_circuit, range(self.n_qubits))
+                if op == 'u':
+                    p = self.create_params(3, update_count)
+                    trial_circuit.u(*p, *pos)
+                    circuit = circuit.compose(trial_circuit, range(self.n_qubits))
+                if op == 'xx':
+                    p = self.create_params(1, update_count)
+                    trial_circuit.rxx(*p, *pos)
+                    circuit = circuit.compose(trial_circuit, range(self.n_qubits))
+                if op == 'yy':
+                    p = self.create_params(1, update_count)
+                    trial_circuit.ryy(*p, *pos)
+                    circuit = circuit.compose(trial_circuit, range(self.n_qubits))
+                if op == 'zz':
+                    p = self.create_params(1, update_count)
+                    trial_circuit.rzz(*p, *pos)
+                    circuit = circuit.compose(trial_circuit, range(self.n_qubits))
+        
         circuit.barrier()
-
         return circuit
 
 

@@ -7,7 +7,7 @@ import numpy as np
 def tens_prod(op_list):
 	""" Compute the tensor product of a list of PauliOp. """
 	return reduce(lambda x, y: x^y, op_list)
-	
+
 
 def one_site_op(n_qubits, site, pauli_op):
 	""" s_i = I^{i-1} otimes s otimes I^{N-i}, where s is a Pauli operator
@@ -67,12 +67,18 @@ def xyz_hamiltonian(n_qubits, model_params, bound_cond='open'):
 
 	# If the boundary conditions are periodic, set n_max = n_qubits
 	n_max = n_qubits - 1 if bound_cond == 'open' else n_qubits
-	for k in range(n_max):
+
+	# Compact implementation of the gates (to minimize the depth of the circuit)
+	for k in range(0, n_max, 2):
+		h += jx * nearest_neigh_op(n_qubits, k, [X, X])  # XX terms
+		h += jy * nearest_neigh_op(n_qubits, k, [Y, Y])  # YY terms
+		h += jz * nearest_neigh_op(n_qubits, k, [Z, Z])  # ZZ terms
+	for k in range(1, n_max, 2):
 		h += jx * nearest_neigh_op(n_qubits, k, [X, X])  # XX terms
 		h += jy * nearest_neigh_op(n_qubits, k, [Y, Y])  # YY terms
 		h += jz * nearest_neigh_op(n_qubits, k, [Z, Z])  # ZZ terms
 
-	return h
+	return h.reduce()
 
 
 def floquet_term(n_qubits):
@@ -150,10 +156,10 @@ def num_op(n_qubits, site):
 
 
 def hubbard_ladder_hamiltonian(size_x, model_params, time=None):
-	""" Hubbard model on a Lx x 2 lattice with open boundary conditions.
+	""" Hubbard model on a size_x x 2 lattice with open boundary conditions.
 
 	Args:
-		size_x (int): dimensions of the square lattice
+		size_x (int): length of the ladder
 		model_params (List[float,...]): hopping and Coulomb strength parameters
 		time (float): time of the evolution (useless parameter here since the Hamiltonian is 
 					time-independent; only here to avoid changing the structure of the code)
@@ -164,27 +170,28 @@ def hubbard_ladder_hamiltonian(size_x, model_params, time=None):
 
 	hop, coul = model_params  # unpack the model parameters
 	h = 0  # initialize the Hamiltonian
-	n_qubits = 2*size_x*2  
+	n_sites = 2 * size_x
+	n_qubits = 2 * n_sites
 
-	# Implement the hopping terms
-	site_indices = range(int(n_qubits/2))
-	hopping_idx_pairs = [(i, i+1) for i in site_indices[:-1]]  # spin up modes nearest neighbour index pairs
-	hopping_idx_pairs += list(zip(site_indices[0::2][:-1], site_indices[1::2][1:]))  # spin up modes long-range index pairs 
-	hopping_idx_pairs += list(np.array(hopping_idx_pairs) + int(n_qubits/2)) # spin down modes index pairs 
+	## Implement the hopping terms to make the associated circuit compact
+	hopping_idx_pairs = [(i, i+1) for i in range(0, n_sites-1, 2)]  # spin up modes: nearest neighbour index pairs
+	hopping_idx_pairs += [(i, i+1) for i in range(1, n_sites-1, 2)]  # spin up modes: nearest neighbour index pairs
+	hopping_idx_pairs += [(i,n_sites-1-i) for i in range(0, size_x-1)]  # spin up modes: long-range index pairs 
+	hopping_idx_pairs += list(np.array(hopping_idx_pairs) + n_sites) # spin down modes index pairs 
 	hopping_idx_pairs = [list(x) for x in hopping_idx_pairs]
-	# print(f'Hopping index pairs: {hopping_idx_pairs}')
 
 	for i, j in hopping_idx_pairs:
 		h += -hop * c_dag_op(n_qubits, i) @ c_op(n_qubits, j) 
 		h += -hop * c_dag_op(n_qubits, j) @ c_op(n_qubits, i)
 
-	# Implement the on-site interaction terms
+	## Implement the on-site interaction terms
 	qubit_indices = range(n_qubits)
-	int_idx_pairs = list(zip(qubit_indices[:int(n_qubits/2)], qubit_indices[int(n_qubits/2):]))
-	# print(f'On-site interaction index pairs: {int_idx_pairs}')
-
+	int_idx_pairs = list(zip(qubit_indices[:n_sites], qubit_indices[n_sites:]))
 	for i, j in int_idx_pairs:
 		h += coul * num_op(n_qubits, i) @ num_op(n_qubits, j)	
+
+	# print(f'Hopping indices: {hopping_idx_pairs}')
+	# print(f'On-site interaction index pairs: {int_idx_pairs}')
 
 	return h.reduce()
 
@@ -263,6 +270,12 @@ def hubbard_2D_hamiltonian(size_x, size_y, model_params, fermionic_indexing='all
 
 	else:
 		print('Periodic boundary conditions have not yet been implemented.')
-
+	
 	return h.reduce()
 
+
+if __name__ == '__main__':
+	from qiskit import QuantumCircuit
+	h1 = hubbard_ladder_hamiltonian(size_x=4, model_params=[1.,0.8], time=None)
+	h2 = hubbard_2D_hamiltonian(size_x=4, size_y=2, model_params=[1.,0.8], fermionic_indexing='allupalldown', time=None, bound_cond='open')
+	print(h1==h2)

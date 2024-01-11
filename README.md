@@ -1,10 +1,10 @@
 ## Adaptive Projected Variational Quantum Dynamics (Adaptive pVQD) 
 
-Repository associated with the Adaptive pVQD paper:
+Associated paper:  
 David Linteau, Stefano Barison, Netanel Lindner, Giuseppe Carleo, Adaptive projected variational quantum dynamics,
 2023, (https://arxiv.org/abs/2307.03229).
 
-Implementatiton based on: 
+Implementatiton based on:  
 - https://github.com/StefanoBarison/p-VQD
 - https://github.com/qiskit-community/qiskit-algorithms/tree/main/qiskit_algorithms/time_evolvers/pvqd
 

@@ -5,6 +5,9 @@ from qiskit.opflow import StateFn, CircuitSampler
 import numpy as np
 from utils import *
 import time
+from qiskit.synthesis import LieTrotter, SuzukiTrotter
+# from scipy.optimize import minimize
+# from qiskit.algorithms.optimizers import ADAM
 
 
 class AdaptivePVQD:
@@ -17,7 +20,8 @@ class AdaptivePVQD:
             fidelity_tolerance,
             gradient_tolerance,
             expectation,
-            quantum_instance
+            quantum_instance,
+            pool_type
     ):
         """
         Args:
@@ -27,6 +31,7 @@ class AdaptivePVQD:
             gradient_tolerance (float): gradient tolerance (\delta) to stop the minimization routine
             expectation (ExpectationBase): expectation converter to evaluate expectation values
             quantum_instance (QuantumInstance): quantum backend to evaluate the circuits
+            pool_type (str): either 'local' or 'non-local' operator pool
         """
         self.ansatz = ansatz
         self.maxiter = maxiter
@@ -34,6 +39,7 @@ class AdaptivePVQD:
         self.gradient_tolerance = gradient_tolerance
         self.expectation = expectation
         self.quantum_instance = quantum_instance
+        self.pool_type = pool_type
 
         self.n_qubits = len(self.ansatz.circuit.qubits)
         self.sampler = CircuitSampler(quantum_instance)
@@ -59,7 +65,7 @@ class AdaptivePVQD:
 
         # Get the time evolved circuit
         trotterized_ansatz = circuit_ansatz.assign_parameters(var_parameters)
-        evolution_gate = PauliEvolutionGate(hamiltonian, time=time_step)  # Lie-Trotter with a single decomposition
+        evolution_gate = PauliEvolutionGate(hamiltonian, time=time_step, synthesis=SuzukiTrotter(order=2, reps=2))  
         trotterized_ansatz.append(evolution_gate, circuit_ansatz.qubits)
 
         # Get the shifted circuit in parameter space
@@ -67,7 +73,7 @@ class AdaptivePVQD:
         shifted_ansatz = circuit_ansatz.assign_parameters(var_parameters + shift)
 
         # Get the overlap/fidelity between the time evoled and the shifted circuits
-        state = StateFn(shifted_ansatz + trotterized_ansatz.inverse())
+        state = StateFn(shifted_ansatz & trotterized_ansatz.inverse())
         overlap = StateFn(projector_zero_local(self.n_qubits), is_measurement=True) @ state
         overlap = self.expectation.convert(overlap)
 
@@ -131,14 +137,14 @@ class AdaptivePVQD:
         print(f'Start of an adaptive step')
 
         # Create the operator pool
-        operator_pool = self.ansatz.create_op_pool(['x','y','z'], ['xx','yy','zz'])
+        operator_pool = self.ansatz.create_op_pool(self.pool_type, ['x','y','z'], ['xx','yy','zz']) 
 
         # Define the array where the gradients will be stored
         new_gradients = np.zeros(len(operator_pool))
 
         # Loop over all the trial operators in the pool
         for i, operator in enumerate(operator_pool):
-
+        
             # Returns a trial circuit without modifying self.ansatz.circuit
             trial_circuit_ansatz = self.ansatz.add_ops([operator], update_count=False)
 
@@ -161,10 +167,8 @@ class AdaptivePVQD:
         ops_and_grad = dict(zip(operator_pool_keys, new_gradients))	
         ops_and_grad_cp = dict(ops_and_grad)  # make a copy of the dictionary
         
-        # Initialize a list to store the operators to add to the current parametrized circuit
-        operators = []
-
-        # Loop until all the qubit indices have been exhausted (i.e. until the pool is empty)
+        ## Method 1: Tetris-like -- loop until all the qubit indices have been exhausted (i.e. until the pool is empty)
+        operators = []  # to store the operators to add to the current parametrized circuit
         while len(ops_and_grad_cp) > 0:
             # Select the operator in the current pool that maximizes the gradient
             op_max_grad = max(ops_and_grad_cp, key=ops_and_grad_cp.get).split('_')
@@ -174,6 +178,12 @@ class AdaptivePVQD:
             # Remove all operators in the pool that act on qubit indices already acted on by op_max_grad
             [ops_and_grad_cp.pop(op) for op in ops_and_grad_cp.copy().keys() if set(eval(op.split('_')[1])).isdisjoint(op_max_grad[1]) == False]
 
+        # ## Method 2: Add simply one gate per adaptive step
+        # # Select the operator in the current pool that maximizes the gradient
+        # op_max_grad = max(ops_and_grad_cp, key=ops_and_grad_cp.get).split('_')
+        # op_max_grad[1] = eval(op_max_grad[1])
+        # operators = [tuple(op_max_grad)]
+
         # Sort the operators according to the qubit(s) on which they act and add them to the circuit
         sorted_idx = np.argsort([op[1][0] for op in operators])
         operators = [operators[i] for i in sorted_idx]
@@ -181,7 +191,7 @@ class AdaptivePVQD:
         print(f'Operators added to the circuit: {operators}')
         # print(f'New circuit ansatz: \n{new_circuit_ansatz}')
 
-        # # Add a Trotter step to the parametrized circuit
+        # ## Method 3: Add a Trotter step/block to the parametrized circuit
         # self.ansatz.add_a_trotter_step()
         # print(f"A Trotter step has been added to the circuit ansatz.")
         # print(self.ansatz.circuit)
@@ -217,6 +227,8 @@ class AdaptivePVQD:
         # Get the infidelity and gradient functions
         infidelity, gradient,_ = self.get_loss(hamiltonian, circuit_ansatz, var_parameters, time_step)
 
+
+        ## Homemade ADAM
         updated_shift = np.copy(shift_init_guess)
         fid = 1 - infidelity(updated_shift)
         grad_norm = max(np.abs(gradient(updated_shift)))  # infinite norm
@@ -238,8 +250,42 @@ class AdaptivePVQD:
             fid = 1 - infidelity(updated_shift)
             
             # Print statement
-            if count % 20 == 0:
-                print(f'Iteration: {count}   Fidelity: {fid}    Gradient: {grad_norm}')
+            if count == 1 or count % 25 == 0:
+                print(f'Iteration: {count} Fidelity: {fid:.8f} Gradient: {grad_norm:.8f}')
+
+
+        ## Scipy Minimize
+        # self.opt_iter = 0
+        # def callback_func(x):
+        #     fid = 1-infidelity(x)
+        #     if self.opt_iter % 20 == 0:
+        #         print(f'Iteration: {self.opt_iter}   Fidelity: {fid}')
+        #     self.opt_iter += 1
+        #     # if fid > fidelity_threshold:
+        #     #     raise Trigger
+
+        # optimizer_result = minimize(
+        #     fun=infidelity,
+        #     x0=shift_init_guess,
+        #     jac=gradient,
+        #     # method='CG',
+        #     callback=callback_func,
+        #     # options={'maxiter': self.maxiter}
+        # )
+        # updated_shift = optimizer_result.x
+        # fid = 1 - optimizer_result.fun
+
+
+        ## Qiskit Minimize
+        # optimizer_result = ADAM(maxiter=500, amsgrad=True).minimize(
+        #     fun=infidelity,
+        #     x0=shift_init_guess,
+        #     jac=gradient,
+        # )
+        # updated_shift = optimizer_result.x
+        # fid = 1 - optimizer_result.fun
+        # print(f'Current fidelity: {fid:.8f}')
+
 
         return updated_shift, fid
 
@@ -307,6 +353,7 @@ class AdaptivePVQD:
             self,
             hamiltonian,
             num_time_steps,
+            initial_time,
             final_time,
             initial_parameters,
             shift_init_guess,
@@ -317,6 +364,7 @@ class AdaptivePVQD:
         Args:
             hamiltonian (functools.partial): Hamiltonian used for the time evolution.
             num_time_steps (int): number of time steps for the time evolution.
+            initial_time (float): initial time of the evolution (non-zero if pre-saved data available)
             final_time (float): final time of the evolution
             initial_parameters (np.array): initial parameters of the circuit ansatz.
             shift_init_guess (np.array): guess for the classical optimization of the infidelity
@@ -327,7 +375,7 @@ class AdaptivePVQD:
         """
 
         start_time = time.time()
-        print(f'Hamiltonian:\n{hamiltonian(time=0)}')
+        print(f'Hamiltonian:\n{hamiltonian(time=initial_time)}')
         print(f'Initial circuit:\n{self.ansatz.circuit}')
 
         # Get the function to evaluate the expectation value of the observables of interest given
@@ -335,8 +383,8 @@ class AdaptivePVQD:
         evaluate_observables = get_observable_evaluator(self.ansatz.circuit, observables, self.expectation, self.sampler)
 
         # Time related stuff
-        time_step = final_time / num_time_steps
-        times = np.linspace(0, final_time, num_time_steps + 1).tolist()  # +1 to include t=0
+        time_step = (final_time - initial_time) / num_time_steps
+        times = np.linspace(initial_time, final_time, num_time_steps + 1).tolist()  # +1 because we include ti and tf
         
         # Initialize the data log at t=0
         data_log = {"times": times,
@@ -379,5 +427,7 @@ class AdaptivePVQD:
             data_log["observables values"].append(evaluate_observables(next_parameters))
             evolved_state = self.ansatz.circuit.bind_parameters(next_parameters)
             data_log["evolved state"].append(evolved_state)
+
+        data_log["final circuit"] = [self.ansatz.circuit]
 
         return data_log

@@ -275,7 +275,6 @@ def hubbard_2D_hamiltonian(size_x, size_y, model_params, fermionic_indexing='all
 
 
 if __name__ == '__main__':
-	from qiskit import QuantumCircuit
 	h1 = hubbard_ladder_hamiltonian(size_x=4, model_params=[1.,0.8], time=None)
 	h2 = hubbard_2D_hamiltonian(size_x=4, size_y=2, model_params=[1.,0.8], fermionic_indexing='allupalldown', time=None, bound_cond='open')
 	print(h1==h2)
